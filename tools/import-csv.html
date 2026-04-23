@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Optimal Log — CSV インポート</title>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <style>
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:-apple-system,sans-serif; background:#F5F5F7; color:#1C1C1E; padding:20px; }
+    h1 { font-size:22px; font-weight:800; margin-bottom:4px; }
+    .subtitle { font-size:13px; color:#8E8E93; margin-bottom:24px; }
+    .card { background:#FFF; border-radius:16px; padding:20px; margin-bottom:16px; box-shadow:0 2px 12px rgba(0,0,0,0.08); }
+    .card h2 { font-size:15px; font-weight:700; margin-bottom:4px; }
+    .card p  { font-size:12px; color:#8E8E93; margin-bottom:12px; line-height:1.6; }
+    label { display:block; font-size:12px; font-weight:700; color:#8E8E93; margin-bottom:6px; }
+    input[type="file"] { display:block; width:100%; padding:10px; border:1.5px dashed #E5E5EA; border-radius:10px; font-size:13px; cursor:pointer; margin-bottom:12px; }
+    input[type="text"] { width:100%; padding:10px 12px; border:1.5px solid #E5E5EA; border-radius:10px; font-size:14px; margin-bottom:12px; outline:none; }
+    input[type="text"]:focus { border-color:#007AFF; }
+    button { background:#007AFF; color:#FFF; border:none; border-radius:12px; padding:12px 20px; font-size:14px; font-weight:700; cursor:pointer; width:100%; margin-top:4px; }
+    button:disabled { background:#C7C7CC; cursor:default; }
+    .log { background:#F2F2F7; border-radius:10px; padding:12px; font-size:12px; font-family:monospace; max-height:300px; overflow-y:auto; margin-top:12px; line-height:1.8; }
+    .log .ok  { color:#34C759; }
+    .log .err { color:#FF3B30; }
+    .log .info{ color:#007AFF; }
+    .step { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .step-num { width:24px; height:24px; border-radius:50%; background:#007AFF; color:#FFF; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .step-text { font-size:13px; font-weight:600; }
+    .step-hint { font-size:11px; color:#8E8E93; }
+    .warn { background:rgba(255,149,0,0.1); border:1px solid rgba(255,149,0,0.3); border-radius:10px; padding:10px 12px; font-size:12px; color:#FF9500; margin-bottom:12px; line-height:1.6; }
+  </style>
+</head>
+<body>
+  <h1>📦 CSVインポートツール</h1>
+  <p class="subtitle">スプレッドシートのデータを Firestore に一括インポートします（1回限りの作業）</p>
+
+  <!-- Step 1: Firebase設定 -->
+  <div class="card">
+    <h2>Step 1 — Firebase設定</h2>
+    <p>index.html と同じ FIREBASE_CONFIG の値を入力してください。</p>
+    <label>Firebase API Key</label>
+    <input type="text" id="cfg-api-key"    placeholder="AIzaSy...">
+    <label>Firebase Project ID</label>
+    <input type="text" id="cfg-project-id" placeholder="your-project-id">
+    <label>Firebase Auth Domain</label>
+    <input type="text" id="cfg-auth-domain" placeholder="your-project-id.firebaseapp.com">
+    <label>Firebase App ID</label>
+    <input type="text" id="cfg-app-id"     placeholder="1:123...:web:abc...">
+    <button onclick="initFirebase()">Firebaseに接続してGoogleログイン</button>
+    <div id="auth-status" style="margin-top:8px;font-size:12px;color:#8E8E93;"></div>
+  </div>
+
+  <!-- Step 2: スプシからエクスポート手順 -->
+  <div class="card">
+    <h2>Step 2 — スプレッドシートからCSVエクスポート</h2>
+    <p>Google スプレッドシートで各シートを個別にCSV保存してください：</p>
+    <div class="step"><div class="step-num">1</div><div><div class="step-text">Metrics_Log シート</div><div class="step-hint">ファイル → ダウンロード → CSV形式</div></div></div>
+    <div class="step"><div class="step-num">2</div><div><div class="step-text">Ingredients シート</div><div class="step-hint">同様にCSVダウンロード</div></div></div>
+    <div class="step"><div class="step-num">3</div><div><div class="step-text">Templates シート</div><div class="step-hint">同様にCSVダウンロード</div></div></div>
+    <div class="step"><div class="step-num">4</div><div><div class="step-text">Settings シート（A2:J2 の値をメモ）</div><div class="step-hint">下のフォームに手入力します</div></div></div>
+  </div>
+
+  <!-- Step 3: インポート -->
+  <div class="card">
+    <h2>Step 3 — データインポート</h2>
+    <div class="warn">⚠️ 既にFirestoreにデータがある場合、同じ日付・IDのデータは上書きされます。初回インポート時のみ使用してください。</div>
+
+    <!-- Metrics_Log -->
+    <label>Metrics_Log.csv</label>
+    <p>列順: 日付, 体重, EWMA(無視), カロリー, タンパク質, 脂質, 炭水化物, 確定スロット, 体脂肪率, 骨格筋率, BMI, 内臓脂肪, メモ</p>
+    <input type="file" id="file-metrics" accept=".csv">
+
+    <!-- Ingredients -->
+    <label>Ingredients.csv</label>
+    <p>列順: ID, 食品名, kcal/100g, タンパク質, 脂質, 炭水化物</p>
+    <input type="file" id="file-ing" accept=".csv">
+
+    <!-- Templates -->
+    <label>Templates.csv</label>
+    <p>列順: パターン(月水金など), 時刻(HH:MM), 食材ID, グラム数</p>
+    <input type="file" id="file-tpl" accept=".csv">
+
+    <!-- Settings -->
+    <label>Settings（手入力）</label>
+    <p>スプレッドシートのSettings シートA2:J2の値を入力してください。</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+      <div><label>P係数</label><input type="text" id="s-p" placeholder="2"></div>
+      <div><label>脂質目標(g)</label><input type="text" id="s-f" placeholder="80"></div>
+      <div><label>基準体重(kg)</label><input type="text" id="s-bw" placeholder="73"></div>
+      <div><label>グラフ日数</label><input type="text" id="s-days" placeholder="14"></div>
+      <div><label>身長(cm)</label><input type="text" id="s-height" placeholder="175"></div>
+      <div><label>年齢</label><input type="text" id="s-age" placeholder="30"></div>
+      <div><label>目標体重(kg)</label><input type="text" id="s-goal" placeholder="70"></div>
+      <div><label>カロリー差分</label><input type="text" id="s-delta" placeholder="-500"></div>
+      <div><label>フェーズ開始日</label><input type="text" id="s-phase-date" placeholder="2026/01/01"></div>
+      <div><label>フェーズ開始体重</label><input type="text" id="s-phase-wt" placeholder="75"></div>
+    </div>
+
+    <button id="btn-import" onclick="startImport()" disabled>インポート開始</button>
+    <div class="log" id="log-output" style="display:none;"></div>
+  </div>
+
+<script>
+let db = null, userRef = null;
+
+function initFirebase() {
+  const apiKey     = document.getElementById('cfg-api-key').value.trim();
+  const projectId  = document.getElementById('cfg-project-id').value.trim();
+  const authDomain = document.getElementById('cfg-auth-domain').value.trim();
+  const appId      = document.getElementById('cfg-app-id').value.trim();
+  if (!apiKey || !projectId) { alert('API KeyとProject IDを入力してください'); return; }
+
+  // 既に初期化済みなら使い回す
+  const app = firebase.apps.length
+    ? firebase.app()
+    : firebase.initializeApp({ apiKey, authDomain: authDomain || `${projectId}.firebaseapp.com`, projectId, appId });
+
+  db = firebase.firestore(app);
+  db.enablePersistence({ synchronizeTabs:true }).catch(()=>{});
+
+  const auth = firebase.auth(app);
+  document.getElementById('auth-status').textContent = 'Googleログイン中...';
+  auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())
+    .then(result => {
+      const user = result.user;
+      userRef = db.collection('users').doc(user.uid);
+      document.getElementById('auth-status').textContent = `✅ ログイン済み: ${user.email} (UID: ${user.uid})`;
+      document.getElementById('btn-import').disabled = false;
+    })
+    .catch(err => {
+      document.getElementById('auth-status').textContent = '❌ ログイン失敗: ' + err.message;
+    });
+}
+
+function log(msg, type = '') {
+  const el = document.getElementById('log-output');
+  el.style.display = 'block';
+  el.innerHTML += `<div class="${type}">${msg}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function parseCSV(text) {
+  return text.trim().split('\n').slice(1) // ヘッダー行スキップ
+    .map(line => {
+      // カンマ区切り（ダブルクォート対応）
+      const cols = [];
+      let cur = '', inQ = false;
+      for (const ch of line) {
+        if (ch === '"') { inQ = !inQ; }
+        else if (ch === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
+        else cur += ch;
+      }
+      cols.push(cur.trim());
+      return cols;
+    })
+    .filter(row => row.some(c => c !== ''));
+}
+
+function toDocKey(dateStr) {
+  // "2026/04/19" or "2026-04-19" → "2026-04-19"
+  const m = String(dateStr).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if (!m) return null;
+  return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+}
+
+async function startImport() {
+  if (!userRef) { alert('先にFirebaseに接続してください'); return; }
+  document.getElementById('btn-import').disabled = true;
+  document.getElementById('log-output').innerHTML = '';
+
+  const fileMetrics = document.getElementById('file-metrics').files[0];
+  const fileIng     = document.getElementById('file-ing').files[0];
+  const fileTpl     = document.getElementById('file-tpl').files[0];
+
+  // ── Settings ──
+  log('⚙️  設定をインポート中...', 'info');
+  try {
+    const settings = {
+      pFactor:          Number(document.getElementById('s-p').value)          || 2,
+      fTargetG:         Number(document.getElementById('s-f').value)          || 80,
+      bw:               Number(document.getElementById('s-bw').value)         || 73,
+      chartDays:        Number(document.getElementById('s-days').value)       || 14,
+      heightCm:         Number(document.getElementById('s-height').value)     || 0,
+      age:              Number(document.getElementById('s-age').value)        || 0,
+      goalWeight:       Number(document.getElementById('s-goal').value)       || 0,
+      calDelta:         Number(document.getElementById('s-delta').value)      || -500,
+      phaseStartDate:   document.getElementById('s-phase-date').value.replace(/-/g,'/') || '',
+      phaseStartWeight: Number(document.getElementById('s-phase-wt').value)   || 0,
+    };
+    await userRef.collection('settings').doc('config').set(settings);
+    log('✅ 設定: 保存完了', 'ok');
+  } catch (e) { log('❌ 設定エラー: ' + e.message, 'err'); }
+
+  // ── Ingredients ──
+  if (fileIng) {
+    log('🍎 食材マスタをインポート中...', 'info');
+    try {
+      const text = await fileIng.text();
+      const rows = parseCSV(text);
+      // バッチ書き込み（500件ずつ）
+      let count = 0, batch = db.batch();
+      for (const row of rows) {
+        const [id, name, kcal, p, f, c] = row;
+        if (!id || !name) continue;
+        const docId = String(id).trim().replace(/\s/g,'_');
+        const ref   = userRef.collection('ingredients').doc(docId);
+        batch.set(ref, { name: String(name).trim(), kcal: Number(kcal)||0, p: Number(p)||0, f: Number(f)||0, c: Number(c)||0 });
+        count++;
+        if (count % 490 === 0) { await batch.commit(); batch = db.batch(); }
+      }
+      await batch.commit();
+      log(`✅ 食材マスタ: ${count}件インポート完了`, 'ok');
+    } catch (e) { log('❌ 食材マスタエラー: ' + e.message, 'err'); }
+  } else {
+    log('⏭️  Ingredients.csv なし — スキップ', 'info');
+  }
+
+  // ── Templates ──
+  if (fileTpl) {
+    log('📋 テンプレートをインポート中...', 'info');
+    try {
+      const text = await fileTpl.text();
+      const rows = parseCSV(text);
+      let count = 0, batch = db.batch();
+      for (const row of rows) {
+        const [pattern, time, ingredientId, amount] = row;
+        if (!pattern || !time || !ingredientId) continue;
+        // 時刻フォーマット正規化（Date形式 → HH:MM）
+        let timeStr = String(time).trim();
+        if (timeStr.includes('T') || timeStr.match(/^\d{4}-/)) {
+          // GASがDate型で出力したケースに対応
+          const d = new Date(timeStr);
+          if (!isNaN(d)) timeStr = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+        }
+        const ref = userRef.collection('templates').doc();
+        batch.set(ref, {
+          pattern: String(pattern).trim(),
+          time:    timeStr,
+          ingredientId: String(ingredientId).trim(),
+          amount:  Number(amount) || 0,
+        });
+        count++;
+        if (count % 490 === 0) { await batch.commit(); batch = db.batch(); }
+      }
+      await batch.commit();
+      log(`✅ テンプレート: ${count}件インポート完了`, 'ok');
+    } catch (e) { log('❌ テンプレートエラー: ' + e.message, 'err'); }
+  } else {
+    log('⏭️  Templates.csv なし — スキップ', 'info');
+  }
+
+  // ── Metrics_Log ──
+  if (fileMetrics) {
+    log('📊 Metrics_Logをインポート中（時間がかかる場合があります）...', 'info');
+    try {
+      const text = await fileMetrics.text();
+      const rows = parseCSV(text);
+      let count = 0, skip = 0, batch = db.batch();
+      for (const row of rows) {
+        // 列: 日付, 体重, EWMA(無視), CAL, P, F, C, 確定スロット, 体脂肪率, 骨格筋率, BMI, 内臓脂肪, メモ
+        const [dateRaw, weight, , cal, p, f, c, slots, fat, muscle, bmi, visceral, memo] = row;
+        const docKey = toDocKey(dateRaw);
+        if (!docKey) { skip++; continue; }
+
+        const data = {};
+        if (weight   && !isNaN(Number(weight)))   data.weight   = Number(weight);
+        if (cal      && !isNaN(Number(cal)))       data.cal      = Number(cal);
+        if (p        && !isNaN(Number(p)))         data.p        = Number(p);
+        if (f        && !isNaN(Number(f)))         data.f        = Number(f);
+        if (c        && !isNaN(Number(c)))         data.c        = Number(c);
+        if (slots    && String(slots).trim())      data.confirmedSlots = String(slots).trim();
+        if (fat      && !isNaN(Number(fat)))       data.fat      = Number(fat);
+        if (muscle   && !isNaN(Number(muscle)))    data.muscle   = Number(muscle);
+        if (bmi      && !isNaN(Number(bmi)))       data.bmi      = Number(bmi);
+        if (visceral && !isNaN(Number(visceral)))  data.visceral = Number(visceral);
+        if (memo     && String(memo).trim())       data.memo     = String(memo).trim();
+
+        const ref = userRef.collection('metrics').doc(docKey);
+        batch.set(ref, data, { merge: true });
+        count++;
+        // バッチを500件ずつコミット
+        if (count % 490 === 0) {
+          await batch.commit();
+          log(`  ... ${count}件処理済み`, 'info');
+          batch = db.batch();
+        }
+      }
+      await batch.commit();
+      log(`✅ Metrics_Log: ${count}件インポート完了（スキップ: ${skip}件）`, 'ok');
+    } catch (e) { log('❌ Metrics_Logエラー: ' + e.message, 'err'); }
+  } else {
+    log('⏭️  Metrics_Log.csv なし — スキップ', 'info');
+  }
+
+  log('🎉 インポート完了！ index.html を開いてデータを確認してください。', 'ok');
+  document.getElementById('btn-import').disabled = false;
+}
+</script>
+</body>
+</html>

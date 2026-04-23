@@ -1,0 +1,85 @@
+============================================================
+  Optimal Log — ウェブアプリ化 作業ログ
+  作業日: 2026-04-24
+============================================================
+
+【完了タスク】
+1. ✅ index.html — メインWebアプリ（HTML + CSS + Firebase JS）
+2. ✅ api/log-weight.js — ショートカット用Vercel APIエンドポイント
+3. ✅ tools/import-csv.html — スプシデータ一括インポートツール
+4. ✅ IRRバグ修正（保存されない不具合）
+5. ✅ 全UIテキストを日本語化（Home/Meals/Diary/Settings タブ名は除く）
+
+【IRRバグ修正内容】
+  - 原因: irrConfirm() 内で closeIrrModal() を呼ぶと irrSlotIdx が null にリセットされるが、
+          その後の setTimeout(()=>confirmSlot(irrSlotIdx), 60) はクロージャで変数参照を
+          捕捉するため、実行時は confirmSlot(null) → DOM取得失敗 → 保存されない
+  - 修正: closeIrrModal() を呼ぶ前に const slotToConfirm = irrSlotIdx でキャプチャし、
+          setTimeout では slotToConfirm を使用するよう変更
+
+【出力ファイル構成】
+  optimal-log/
+  ├── index.html            ← メインWebアプリ (1950行)
+  ├── package.json          ← Vercel用依存パッケージ定義
+  ├── api/
+  │   └── log-weight.js     ← iPhoneショートカット受信API
+  └── tools/
+      └── import-csv.html   ← 一度限りのCSVインポートツール
+
+【アーキテクチャ】
+  フロントエンド : index.html（Firebase Hosting などの静的ホストで公開）
+  データベース   : Firebase Firestore（/users/{uid}/ 以下にユーザーデータを格納）
+  認証          : Firebase Auth（Googleログイン）
+  ショートカットAPI: Vercel Serverless Function（無料プラン）
+
+【セットアップ手順（概要）】
+  Step 1 — Firebase プロジェクト作成
+    1. https://console.firebase.google.com でプロジェクト作成
+    2. Authentication → Googleプロバイダを有効化
+    3. Firestore Database → 本番モードで作成（リージョン: asia-northeast1 推奨）
+    4. Firestore セキュリティルール（下記）を適用
+    5. プロジェクト設定 → Webアプリを追加 → FIREBASE_CONFIG の値を取得
+
+  Firestoreセキュリティルール:
+    rules_version = '2';
+    service cloud.firestore {
+      match /databases/{database}/documents {
+        match /users/{userId}/{document=**} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+      }
+    }
+
+  Step 2 — index.html の FIREBASE_CONFIG を編集
+    FIREBASE_CONFIG の 6項目に Firebase コンソールの値を貼り付ける
+
+  Step 3 — データ移行（初回のみ）
+    1. スプシで Metrics_Log / Ingredients / Templates を CSV ダウンロード
+    2. tools/import-csv.html をブラウザで開く
+    3. Firebase設定を入力 → Googleログイン → CSV選択 → インポート開始
+
+  Step 4 — Vercel デプロイ（ショートカット用API）
+    1. https://vercel.com でアカウント作成（無料）
+    2. optimal-log/ フォルダをGitHubにpush → Vercelと連携
+    3. 環境変数を設定:
+       - FIREBASE_SERVICE_ACCOUNT_JSON: Firebaseコンソール → サービスアカウント → 新しい秘密鍵を生成 → JSONを1行に変換して貼り付け
+       - SHORTCUT_SECRET: 任意の文字列（例: mysecret123）
+       - USER_UID: FirebaseコンソールのAuthentication → Users でメールアドレスのUID確認
+    4. デプロイ後のURL: https://your-project.vercel.app/api/log-weight
+
+  Step 5 — iPhoneショートカット作成
+    既存ショートカットのURLを下記に変更するか、新規作成:
+      URL    : https://your-project.vercel.app/api/log-weight?secret=YOUR_SECRET
+      メソッド: POST
+      本文   : weight=[体重値]&fat=[体脂肪率]&muscle=[骨格筋率]&visceral=[内臓脂肪]
+    ※ 元のGASショートカット (icloud.com/shortcuts/281ac15d367e485b861a1cf3e8eabe13) のURL部分だけ変更
+
+【日本語化対応箇所（主要）】
+  残りカロリー / 体組成 / 体重・体脂肪率・骨格筋率・内臓脂肪
+  トレンド / カロリー / 目標以下・超過・7日平均
+  本日のPFCバランス / 全スロット確定 / 食事記録
+  カレンダー / 日記 / マクロ栄養素 / 身体情報・目標
+  フェーズ管理 / 表示設定 / テーマ（ライト/ダーク）
+  確定 / 取消 / 未保存 / 食品追加 / 追加して確定
+  イレギュラー入力 / スロット確定 / アカウント / サインアウト
+============================================================
