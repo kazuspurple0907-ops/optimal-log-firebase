@@ -61,17 +61,19 @@ module.exports = async (req, res) => {
     return res.status(400).send('Error: No weight data received');
   }
 
-  // 日付確定
-  let docDate = new Date();
+  // 日付確定（デフォルトは JST = UTC+9）
+  let docKey;
   if (date) {
     const m = String(date).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
-    if (m) docDate = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (m) {
+      docKey = `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+    }
   }
-  const docKey = [
-    docDate.getFullYear(),
-    String(docDate.getMonth() + 1).padStart(2, '0'),
-    String(docDate.getDate()).padStart(2, '0'),
-  ].join('-'); // "2026-04-19"
+  if (!docKey) {
+    // UTC+9 の現在日付を取得
+    const jst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    docKey = jst.toISOString().slice(0, 10); // "YYYY-MM-DD"
+  }
 
   const db     = admin.firestore();
   const userRef = db.collection('users').doc(uid);
