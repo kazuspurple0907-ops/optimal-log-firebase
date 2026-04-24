@@ -861,14 +861,11 @@ auth.onAuthStateChanged(user => {
     if (el) el.textContent = user.email || user.displayName || user.uid;
     init();
   } else {
-    // 未ログイン → Googleリダイレクトサインイン
-    auth.signInWithRedirect(new firebase.auth.GoogleAuthProvider());
+    // 未ログイン → Googleポップアップサインイン（Chrome サードパーティCookie対策）
+    auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(err => {
+      console.error('Auth popup error:', err);
+    });
   }
-});
-
-// リダイレクト戻り時のエラーハンドリング
-auth.getRedirectResult().catch(err => {
-  console.error('Auth redirect error:', err);
 });
 
 function doSignOut() {
