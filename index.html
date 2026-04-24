@@ -1084,7 +1084,14 @@ async function getAppData(targetDateStr, overridePattern) {
     if (!timelineMap[tpl.time]) timelineMap[tpl.time] = { time: tpl.time, items: [] };
     timelineMap[tpl.time].items.push(item);
   });
-  const timeline = Object.values(timelineMap).sort((a, b) => a.time.localeCompare(b.time));
+  // スロット並び順: 朝飯→トレ前→トレ中→トレ後→HH:MM昇順
+  const SLOT_ORDER = { '朝飯': 0, 'トレ前': 1, 'トレ中': 2, 'トレ後': 3 };
+  function slotSortKey(t) {
+    if (t in SLOT_ORDER) return SLOT_ORDER[t];
+    const m = t.match(/^(\d{1,2}):(\d{2})$/);
+    return m ? 1000 + parseInt(m[1]) * 60 + parseInt(m[2]) : 9999;
+  }
+  const timeline = Object.values(timelineMap).sort((a, b) => slotSortKey(a.time) - slotSortKey(b.time));
 
   // メトリクスを日付昇順ソート + EWMA計算
   const sorted = allMetricsRaw.slice().sort((a, b) => a.docKey.localeCompare(b.docKey));
